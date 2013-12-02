@@ -1,4 +1,4 @@
 (ns lightning-browse.utils)
 
-(def log [x]
-  (. js/console (log x)))
+(defn console-log [x]
+  (.log js/console x))
