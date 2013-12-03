@@ -6,7 +6,7 @@
    [cljs.core.async.macros :refer [go go-loop]]))
 
 (def current-track (atom nil))
-;; three functions: stop current track, play current track, update current track
+
 (defn stop-current-track! []
   (when @current-track
     (.stop @current-track)))
@@ -24,10 +24,14 @@
     (.pause @current-track)))
 
 (defn stream-track [track]
-  (. js/SC (stream (str "/tracks/" track)
-                   (fn [sound]
-                     (update-current-track! sound)
-                     (play-current-track!)))))
+  (let [artist ((track "user") "username")
+        title (track "title")]
+    (set! (.-innerHTML (.getElementById js/document "artist")) artist)
+    (set! (.-innerHTML (.getElementById js/document "track")) title))
+    (. js/SC (stream (str "/tracks/" (track "id"))
+                     (fn [sound]
+                       (update-current-track! sound)
+                       (play-current-track!)))))
 
 (defn get-tracks [limit]
   (let [tracks (chan 1)]
@@ -54,11 +58,14 @@
         click-events (event-chan (.getElementById js/document "play") "click")
         transition {:init :playing, :paused :playing, :playing :paused}]
     (go-loop [state :init]
-       (<! click-events)
-       (case state
-         :init (stream-track ((<! queue) "id"))
-         :paused (play-current-track!)
-         :playing (pause-current-track!))
-       (recur (transition state)))))
+             (<! click-events)
+             (case state
+               :init (do (set! (.-innerHTML (.getElementById js/document "play")) "Pause")
+                         (stream-track (<! queue)))
+               :paused (do (set! (.-innerHTML (.getElementById js/document "play")) "Play")
+                           (play-current-track!))
+               :playing (do (set! (.-innerHTML (.getElementById js/document "play")) "Pause")
+                            (pause-current-track!)))
+             (recur (transition state)))))
 
-  (set! (.-onload js/window) -main)
+(set! (.-onload js/window) -main)
