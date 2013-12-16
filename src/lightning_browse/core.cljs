@@ -1,7 +1,7 @@
 (ns lightning-browse.core
   (:require [lightning-browse.config :as config]
             [lightning-browse.utils :as utils]
-            [cljs.core.async :as async :refer [chan close! sliding-buffer put! >! <!]])
+            [cljs.core.async :as async :refer [chan close! sliding-buffer put! take! >! <!]])
   (:require-macros
    [cljs.core.async.macros :refer [go go-loop]]))
 
@@ -22,6 +22,17 @@
 (defn pause-current-track! []
   (when @current-track
     (.pause @current-track)))
+
+(defrecord queue-handling [chan queued-count taken-count]
+  ;;TODO: Determine whether it's feasible to reduce the two atoms a single atom that contains the difference between queued/taken
+  (take! [chan]
+    "Takes a track from a channel while incrementing the count of tracks retrieved from the channel."
+    (do (set! taken-count (inc taken-count))
+        (take! chan)))
+  (put! [track chan]
+    "Adds a track to a channel while decrementing the count of tracks queued on the channel."
+    (do (set! queued-count (dec queued-count))
+        (put! chan track))))
 
 (defn stream-track [track]
   (let [artist ((track "user") "username")
