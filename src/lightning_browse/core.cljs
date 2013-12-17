@@ -46,49 +46,50 @@
     (.log js/console @queued-count)
     (impl/put! chan val fn)))
 
-(defn stream-track [track]
-  (let [artist ((track "user") "username")
-        title (track "title")]
-    (set! (.-innerHTML (.getElementById js/document "artist")) artist)
-    (set! (.-innerHTML (.getElementById js/document "track")) title))
-    (. js/SC (stream (str "/tracks/" (track "id"))
-                     (fn [sound]
-                       (update-current-track! sound)
-                       (play-current-track!)))))
+(defn fill-channel [chan track]
+  (.stream js/SC (str "/tracks/" (track "id"))
+           (fn [sound] (put! chan (assoc track :sound-manager sound)))))
 
-(defn make-chan []
-  (let [tracks (AutofillChan. (chan) (atom 0))]
+(defn make-chan [tracks]
     (. js/SC (get "/tracks"
                   (clj->js {:limit buffer-size})
                 (fn [response] (go
                                 (doseq [x (filter #(% "streamable")(js->clj response))]
-                                       (put! tracks x))))))
-    tracks))
+                                  (fill-channel tracks x))))))
+    tracks)
 
 (defn event-chan [object type]
    (let [events (chan 10)]
     (.addEventListener object type (fn [e] (put! events e)))
     events))
 
-(defn set-track [element track-id client-id]
-  (let [url (str "http://api.soundcloud.com/tracks/" track-id "/stream?client_id=" client-id)]
-    (set! (.-src (. js/document (getElementById element))) url)))
-
 (. js/SC (initialize (clj->js config/settings)))
 
+(def main-queue (AutofillChan. (chan) (atom 0)))
+
 (defn -main []
-  (let [queue (make-chan)
+  (let [queue (make-chan main-queue)
         play-events (event-chan (.getElementById js/document "play") "click")
+        next-events (event-chan (.getElementById js/document "next") "click")
         transition {:init :playing, :paused :playing, :playing :paused}]
-    (go-loop [state :init]
-             (<! play-events)
-             (case state
-               :init (do (set! (.-innerHTML (.getElementById js/document "play")) "Pause")
-                                                 (stream-track (<! queue)))
-               :paused (do (set! (.-innerHTML (.getElementById js/document "play")) "Pause")
-                           (play-current-track!))
-               :playing (do (set! (.-innerHTML (.getElementById js/document "play")) "Play")
-                            (pause-current-track!)))
-             (recur (transition state)))))
+    (go-loop [state :init
+              immediate? false]
+             (.log js/console (str state ":" immediate? "hihihihi"))
+             (let [c (if immediate?
+                       play-events
+                       (second (alts! [play-events next-events])))]
+               (if (= c play-events)
+                 (do
+                   (case state
+                     :init (do (set! (.-innerHTML (.getElementById js/document "play")) "Pause")
+                               (let [track (:sound-manager (<! queue))]
+                                 (update-current-track! track)
+                                 (play-current-track!)))
+                     :paused (do (set! (.-innerHTML (.getElementById js/document "play")) "Pause")
+                                 (play-current-track!))
+                     :playing (do (set! (.-innerHTML (.getElementById js/document "play")) "Play")
+                                  (pause-current-track!)))
+                   (recur (transition state) false))
+                 (recur :init true))))))
 
 (set! (.-onload js/window) -main)
