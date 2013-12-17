@@ -1,6 +1,7 @@
 (ns lightning-browse.core
   (:require [lightning-browse.config :as config]
             [lightning-browse.utils :as utils]
+            [cljs.core.async.impl.protocols :as impl]
             [cljs.core.async :as async :refer [chan close! sliding-buffer put! take! >! <!]])
   (:require-macros
    [cljs.core.async.macros :refer [go go-loop]]))
@@ -23,16 +24,27 @@
   (when @current-track
     (.pause @current-track)))
 
-(defrecord queue-handling [chan queued-count taken-count]
-  ;;TODO: Determine whether it's feasible to reduce the two atoms a single atom that contains the difference between queued/taken
-  (take! [chan]
+(defn refill [chan]
+  nil)
+
+(def buffer-size 5)
+
+(defrecord AutofillChan [chan queued-count]
+   impl/ReadPort
+  (take! [this fn]
     "Takes a track from a channel while incrementing the count of tracks retrieved from the channel."
-    (do (set! taken-count (inc taken-count))
-        (take! chan)))
-  (put! [track chan]
+    (swap! queued-count dec)
+    (when (<= queued-count buffer-size) (refill this))
+    (.log js/console "taking track from channel")
+    (.log js/console @queued-count)
+    (impl/take! chan fn))
+  impl/WritePort
+  (put! [this val fn]
     "Adds a track to a channel while decrementing the count of tracks queued on the channel."
-    (do (set! queued-count (dec queued-count))
-        (put! chan track))))
+    (swap! queued-count inc)
+    (.log js/console "putting track on channel")
+    (.log js/console @queued-count)
+    (impl/put! chan val fn)))
 
 (defn stream-track [track]
   (let [artist ((track "user") "username")
@@ -44,10 +56,10 @@
                        (update-current-track! sound)
                        (play-current-track!)))))
 
-(defn get-tracks [limit]
-  (let [tracks (chan 1)]
+(defn make-chan []
+  (let [tracks (AutofillChan. (chan) (atom 0))]
     (. js/SC (get "/tracks"
-                  (clj->js {:limit limit})
+                  (clj->js {:limit buffer-size})
                 (fn [response] (go
                                 (doseq [x (filter #(% "streamable")(js->clj response))]
                                        (put! tracks x))))))
@@ -65,17 +77,17 @@
 (. js/SC (initialize (clj->js config/settings)))
 
 (defn -main []
-  (let [queue (get-tracks 100)
-        click-events (event-chan (.getElementById js/document "play") "click")
+  (let [queue (make-chan)
+        play-events (event-chan (.getElementById js/document "play") "click")
         transition {:init :playing, :paused :playing, :playing :paused}]
     (go-loop [state :init]
-             (<! click-events)
+             (<! play-events)
              (case state
                :init (do (set! (.-innerHTML (.getElementById js/document "play")) "Pause")
-                         (stream-track (<! queue)))
-               :paused (do (set! (.-innerHTML (.getElementById js/document "play")) "Play")
+                                                 (stream-track (<! queue)))
+               :paused (do (set! (.-innerHTML (.getElementById js/document "play")) "Pause")
                            (play-current-track!))
-               :playing (do (set! (.-innerHTML (.getElementById js/document "play")) "Pause")
+               :playing (do (set! (.-innerHTML (.getElementById js/document "play")) "Play")
                             (pause-current-track!)))
              (recur (transition state)))))
 
