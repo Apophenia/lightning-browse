@@ -30,8 +30,8 @@
 (def buffer-size 5)
 
 (defrecord AutofillChan [chan queued-count]
-   impl/ReadPort
-  (take! [this fn]
+  impl/ReadPort
+   (take! [this fn]
     "Takes a track from a channel while incrementing the count of tracks retrieved from the channel."
     (swap! queued-count dec)
     (when (<= queued-count buffer-size) (refill this))
@@ -51,16 +51,16 @@
            (fn [sound] (put! chan (assoc track :sound-manager sound)))))
 
 (defn make-chan [tracks]
-    (. js/SC (get "/tracks"
+  (. js/SC (get "/tracks"
                   (clj->js {:limit buffer-size})
-                (fn [response] (go
+                  (fn [response] (go
                                 (doseq [x (filter #(% "streamable")(js->clj response))]
                                   (fill-channel tracks x))))))
     tracks)
 
 (defn event-chan [object type]
-   (let [events (chan 10)]
-    (.addEventListener object type (fn [e] (put! events e)))
+  (let [events (chan 10)]
+     (.addEventListener object type (fn [e] (put! events e)))
     events))
 
 (. js/SC (initialize (clj->js config/settings)))
@@ -74,7 +74,6 @@
         transition {:init :playing, :paused :playing, :playing :paused}]
     (go-loop [state :init
               immediate? false]
-             (.log js/console (str state ":" immediate? "hihihihi"))
              (let [c (if immediate?
                        play-events
                        (second (alts! [play-events next-events])))]
